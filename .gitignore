@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.exe
+.env
+.venv
+env/
+venv/
+
+# Streamlit 私密金鑰
+.streamlit/secrets.toml
+
+# 暫存與建置檔案
+dist/
+build/
+*.spec
