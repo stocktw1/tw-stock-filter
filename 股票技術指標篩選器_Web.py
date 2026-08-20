@@ -412,12 +412,12 @@ st.divider()
 # ------------------ 篩選公式編輯區 ------------------
 st.header("3. 篩選公式編輯")
 
-# 讓 Text Area 可以雙向綁定 session_state
-st.session_state.formula = st.text_area("請在此輸入或修改篩選條件：", value=st.session_state.formula, height=100)
+st.text_area("請在此輸入或修改篩選條件：", key="formula", height=100)
 
-if st.button("清除公式", type="secondary"):
+def clear_formula():
     st.session_state.formula = ""
-    st.rerun()
+
+st.button("清除公式", on_click=clear_formula, type="secondary")
 
 st.divider()
 
@@ -432,6 +432,96 @@ csv_files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv')]
 
 col_run1, col_run2 = st.columns(2)
 
+from concurrent.futures import ThreadPoolExecutor
+
+def process_single_stock_web(f, required_inds, py_formula, requested_shifts, period_type):
+    symbol = f.split('_')[0]
+    try:
+        df_raw = load_stock_csv(os.path.join(DATA_DIR, f))
+        if len(df_raw) < 50: 
+            return None
+        
+        df_d = df_raw
+        df_w = convert_to_weekly(df_raw)
+        df_m = convert_to_monthly(df_raw)
+        
+        df_d = calculate_dynamic_indicators(df_d, required_inds)
+        df_w = calculate_dynamic_indicators(df_w, required_inds)
+        df_m = calculate_dynamic_indicators(df_m, required_inds)
+        
+        scalar_dict = {}
+        for col in df_d.columns:
+            if len(df_d) > 0:
+                scalar_dict[f"D_{col}"] = df_d[col].iloc[-1]
+                for s in requested_shifts:
+                    if len(df_d) > s:
+                        scalar_dict[f"D_{col}_shift_{s}"] = df_d[col].iloc[-1 - s]
+        for col in df_w.columns:
+            if len(df_w) > 0:
+                scalar_dict[f"W_{col}"] = df_w[col].iloc[-1]
+                for s in requested_shifts:
+                    if len(df_w) > s:
+                        scalar_dict[f"W_{col}_shift_{s}"] = df_w[col].iloc[-1 - s]
+        for col in df_m.columns:
+            if len(df_m) > 0:
+                scalar_dict[f"M_{col}"] = df_m[col].iloc[-1]
+                for s in requested_shifts:
+                    if len(df_m) > s:
+                        scalar_dict[f"M_{col}_shift_{s}"] = df_m[col].iloc[-1 - s]
+        
+        is_match = eval(py_formula, {"__builtins__": None}, scalar_dict)
+        if is_match:
+            if period_type == "週線":
+                date_str = df_w.index[-1].strftime('%Y-%m-%d')
+            elif period_type == "月線":
+                date_str = df_m.index[-1].strftime('%Y-%m-%d')
+            else:
+                date_str = df_d.index[-1].strftime('%Y-%m-%d')
+            
+            terms = re.findall(r'\b[DWM]_[a-zA-Z0-9_]+\b', py_formula)
+            valid_terms = set(terms)
+            data_info_list = []
+            for term in valid_terms:
+                val = scalar_dict.get(term)
+                if val is None:
+                    continue
+                val_str = f"{val:.2f}" if isinstance(val, (float, np.floating)) else str(val)
+                parts = term.split('_')
+                prefix_char = "週" if parts[0] == 'W' else ("月" if parts[0] == 'M' else "日")
+                if 'shift' in parts:
+                    shift_idx = parts.index('shift')
+                    shift_num = parts[shift_idx + 1]
+                    var_name = "_".join(parts[1:shift_idx])
+                    display_name = f"{shift_num}{prefix_char}前{prefix_char}{var_name}"
+                else:
+                    var_name = "_".join(parts[1:])
+                    display_name = f"{prefix_char}{var_name}"
+                
+                display_name = display_name.replace('PDI', '+DI').replace('MDI', '-DI').replace('CCI', '順勢指標')
+                display_name = display_name.replace('C', '收盤價').replace('O', '開盤價').replace('H', '最高價').replace('L', '最低價').replace('V', '成交量')
+                data_info_list.append(f"{display_name}={val_str}")
+                
+            data_info_str = ", ".join(sorted(data_info_list))
+
+            last_close = float(df_d['C'].iloc[-1])
+            last_vol = float(df_d['V'].iloc[-1]) if 'V' in df_d.columns else 0.0
+            trade_value_raw = last_close * last_vol * 1000  # 元
+            trade_value_yi = trade_value_raw / 100_000_000  # 億元
+
+            return {
+                "代碼": symbol, 
+                "股名": get_stock_name(symbol),
+                "日期": date_str, 
+                "收盤價": f"{last_close:.2f}",
+                "成交量(張)": f"{int(last_vol):,}",
+                "成交值(億)": f"{trade_value_yi:.2f}",
+                "指標數據": data_info_str,
+                "_sort_val": trade_value_raw
+            }
+    except Exception:
+        pass
+    return None
+
 def run_screener(is_test=False):
     formula_raw = st.session_state.formula.replace('\n', ' ').strip()
     if not formula_raw:
@@ -441,130 +531,41 @@ def run_screener(is_test=False):
     try:
         required_inds, formula_with_vars = extract_indicators_from_formula(formula_raw)
         py_formula = parse_formula(formula_with_vars, period_type)
+        requested_shifts = [int(s) for s in re.findall(r'_shift_(\d+)', py_formula)]
     except Exception as e:
         st.error(f"語法解析錯誤: {e}")
         return
         
     target_files = random.sample(csv_files, min(len(csv_files), 10)) if is_test else csv_files
     
-    st.info(f"內部轉換語法: `{py_formula}`")
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    st.info(f"內部轉換語法: `{py_formula}` （共掃描 {len(target_files)} 檔股票）")
     
-    matches = []
-    for idx, f in enumerate(target_files):
-        symbol = f.split('_')[0]
-        status_text.text(f"正在掃描: {symbol} ({idx+1}/{len(target_files)})")
-        try:
-            df_raw = load_stock_csv(os.path.join(DATA_DIR, f))
-            if len(df_raw) < 50: continue
-            
-            df_d = df_raw
-            df_w = convert_to_weekly(df_raw)
-            df_m = convert_to_monthly(df_raw)
-            
-            df_d = calculate_dynamic_indicators(df_d, required_inds)
-            df_w = calculate_dynamic_indicators(df_w, required_inds)
-            df_m = calculate_dynamic_indicators(df_m, required_inds)
-            
-            requested_shifts = [int(s) for s in re.findall(r'_shift_(\d+)', py_formula)]
-            
-            scalar_dict = {}
-            # 日線
-            for col in df_d.columns:
-                if len(df_d) > 0:
-                    scalar_dict[f"D_{col}"] = df_d[col].iloc[-1]
-                    for s in requested_shifts:
-                        if len(df_d) > s:
-                            scalar_dict[f"D_{col}_shift_{s}"] = df_d[col].iloc[-1 - s]
-            # 週線
-            for col in df_w.columns:
-                if len(df_w) > 0:
-                    scalar_dict[f"W_{col}"] = df_w[col].iloc[-1]
-                    for s in requested_shifts:
-                        if len(df_w) > s:
-                            scalar_dict[f"W_{col}_shift_{s}"] = df_w[col].iloc[-1 - s]
-            # 月線
-            for col in df_m.columns:
-                if len(df_m) > 0:
-                    scalar_dict[f"M_{col}"] = df_m[col].iloc[-1]
-                    for s in requested_shifts:
-                        if len(df_m) > s:
-                            scalar_dict[f"M_{col}_shift_{s}"] = df_m[col].iloc[-1 - s]
-            
-            is_match = eval(py_formula, {"__builtins__": None}, scalar_dict)
-            
-            if is_match:
-                # 取得基準週期的日期
-                if period_type == "週線":
-                    date_str = df_w.index[-1].strftime('%Y-%m-%d')
-                elif period_type == "月線":
-                    date_str = df_m.index[-1].strftime('%Y-%m-%d')
-                else:
-                    date_str = df_d.index[-1].strftime('%Y-%m-%d')
-                
-                # 提取變數對應數據
-                terms = re.findall(r'\b[DWM]_[a-zA-Z0-9_]+\b', py_formula)
-                valid_terms = set(terms)
-                data_info_list = []
-                for term in valid_terms:
-                    val = scalar_dict.get(term)
-                    if val is None:
-                        continue
-                    val_str = f"{val:.2f}" if isinstance(val, (float, np.floating)) else str(val)
-                    
-                    parts = term.split('_')
-                    prefix_char = "週" if parts[0] == 'W' else ("月" if parts[0] == 'M' else "日")
-                    
-                    if 'shift' in parts:
-                        shift_idx = parts.index('shift')
-                        shift_num = parts[shift_idx + 1]
-                        var_name = "_".join(parts[1:shift_idx])
-                        display_name = f"{shift_num}{prefix_char}前{prefix_char}{var_name}"
-                    else:
-                        var_name = "_".join(parts[1:])
-                        display_name = f"{prefix_char}{var_name}"
-                    
-                    display_name = display_name.replace('PDI', '+DI').replace('MDI', '-DI').replace('CCI', '順勢指標')
-                    display_name = display_name.replace('C', '收盤價').replace('O', '開盤價').replace('H', '最高價').replace('L', '最低價').replace('V', '成交量')
-                    data_info_list.append(f"{display_name}={val_str}")
-                    
-                # 計算當日成交量與當日成交值 (成交值 = 收盤價 * 成交量(張) * 1000)
-                last_close = float(df_d['C'].iloc[-1])
-                last_vol = float(df_d['V'].iloc[-1]) if 'V' in df_d.columns else 0.0
-                trade_value_raw = last_close * last_vol * 1000  # 元
-                trade_value_yi = trade_value_raw / 100_000_000  # 億元
-
-                matches.append({
-                    "代碼": symbol, 
-                    "股名": get_stock_name(symbol),
-                    "日期": date_str, 
-                    "收盤價": f"{last_close:.2f}",
-                    "成交量(張)": f"{int(last_vol):,}",
-                    "成交值(億)": f"{trade_value_yi:.2f}",
-                    "指標數據": data_info_str,
-                    "_sort_val": trade_value_raw
-                })
-        except Exception as e:
-            pass
-            
-        progress_bar.progress((idx + 1) / len(target_files))
+    with st.spinner("⚡ 正在極速平行比對全市場資料庫..."):
+        matches = []
+        max_workers = min(32, (os.cpu_count() or 4) * 4)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(process_single_stock_web, f, required_inds, py_formula, requested_shifts, period_type)
+                for f in target_files
+            ]
+            for future in futures:
+                res = future.result()
+                if res:
+                    matches.append(res)
         
-    status_text.empty()
     if matches:
         # 按照當日成交值由大到小排序 (降序)
         matches.sort(key=lambda x: x["_sort_val"], reverse=True)
-        # 移除內部排序輔助鍵
         for item in matches:
             item.pop("_sort_val", None)
 
-        st.success(f"🎉 篩選完成！共找到 {len(matches)} 檔符合條件（已按當日成交值由大到小排序）。")
+        st.success(f"🎉 篩選完成！全市場共掃描 {len(target_files)} 檔，找到 **{len(matches)}** 檔符合條件（已按當日成交值由大到小排序）。")
         st.dataframe(pd.DataFrame(matches), use_container_width=True)
     else:
         if is_test:
-            st.info("💡 隨機抽樣 10 檔中未命中此嚴格條件，請點擊右側 **【🚀 開始全量篩選】** 掃描全市場 1,120+ 檔股票！")
+            st.info("💡 隨機抽樣 10 檔中未命中此條件，請點擊右側 **【🚀 開始全量篩選】** 掃描全市場 1,120+ 檔股票！")
         else:
-            st.warning("結果：全市場目前沒有找到完全符合所有條件的股票。")
+            st.warning(f"結果：全市場共掃描 {len(target_files)} 檔股票，未找到完全符合所有條件的標的。")
 
 with col_run1:
     if st.button("🎯 隨機抽樣測試 (10檔)", use_container_width=True):
