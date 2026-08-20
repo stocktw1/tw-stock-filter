@@ -515,7 +515,6 @@ def process_single_stock_web(f, required_inds, py_formula, requested_shifts, per
                 "收盤價": f"{last_close:.2f}",
                 "成交量(張)": f"{int(last_vol):,}",
                 "成交值(億)": f"{trade_value_yi:.2f}",
-                "指標數據": data_info_str,
                 "_sort_val": trade_value_raw
             }
     except Exception:
@@ -559,8 +558,22 @@ def run_screener(is_test=False):
         for item in matches:
             item.pop("_sort_val", None)
 
+        df_results = pd.DataFrame(matches)
+        
         st.success(f"🎉 篩選完成！全市場共掃描 {len(target_files)} 檔，找到 **{len(matches)}** 檔符合條件（已按當日成交值由大到小排序）。")
-        st.dataframe(pd.DataFrame(matches), use_container_width=True)
+        st.dataframe(df_results, use_container_width=True)
+        
+        # 匯出排列整齊、無亂碼的 CSV 檔案 (包含 utf-8-sig BOM 標籤)
+        csv_bytes = df_results.to_csv(index=False).encode('utf-8-sig')
+        current_time_str = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+        st.download_button(
+            label="📥 下載篩選結果為 CSV 檔案",
+            data=csv_bytes,
+            file_name=f"台股選股結果_{current_time_str}.csv",
+            mime="text/csv",
+            type="primary",
+            use_container_width=True
+        )
     else:
         if is_test:
             st.info("💡 隨機抽樣 10 檔中未命中此條件，請點擊右側 **【🚀 開始全量篩選】** 掃描全市場 1,120+ 檔股票！")
