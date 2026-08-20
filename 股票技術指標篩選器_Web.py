@@ -515,13 +515,20 @@ def run_screener(is_test=False):
                     display_name = display_name.replace('C', '收盤價').replace('O', '開盤價').replace('H', '最高價').replace('L', '最低價').replace('V', '成交量')
                     data_info_list.append(f"{display_name}={val_str}")
                     
-                data_info_str = ", ".join(sorted(data_info_list))
-                
+                # 計算當日成交量與當日成交值 (成交值 = 收盤價 * 成交量(張) * 1000)
+                last_close = float(df_d['C'].iloc[-1])
+                last_vol = float(df_d['V'].iloc[-1]) if 'V' in df_d.columns else 0.0
+                trade_value_raw = last_close * last_vol * 1000  # 元
+                trade_value_yi = trade_value_raw / 100_000_000  # 億元
+
                 matches.append({
                     "代碼": symbol, 
                     "日期": date_str, 
-                    "收盤價": f"{df_d['C'].iloc[-1]:.2f}",
-                    "指標數據": data_info_str
+                    "收盤價": f"{last_close:.2f}",
+                    "成交量(張)": f"{int(last_vol):,}",
+                    "成交值(億)": f"{trade_value_yi:.2f}",
+                    "指標數據": data_info_str,
+                    "_sort_val": trade_value_raw
                 })
         except Exception as e:
             pass
@@ -530,7 +537,13 @@ def run_screener(is_test=False):
         
     status_text.empty()
     if matches:
-        st.success(f"🎉 篩選完成！共找到 {len(matches)} 檔符合條件。")
+        # 按照當日成交值由大到小排序 (降序)
+        matches.sort(key=lambda x: x["_sort_val"], reverse=True)
+        # 移除內部排序輔助鍵
+        for item in matches:
+            item.pop("_sort_val", None)
+
+        st.success(f"🎉 篩選完成！共找到 {len(matches)} 檔符合條件（已按當日成交值由大到小排序）。")
         st.dataframe(pd.DataFrame(matches), use_container_width=True)
     else:
         st.warning("結果：沒有找到符合條件的股票。")

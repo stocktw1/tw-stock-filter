@@ -324,11 +324,19 @@ def process_single_stock(filename, required_inds, py_formula, requested_shifts, 
 
             data_info_str = ", ".join(sorted(data_info_list))
 
+            last_close = float(df_d['C'].iloc[-1])
+            last_vol = float(df_d['V'].iloc[-1]) if 'V' in df_d.columns else 0.0
+            turnover_raw = last_close * last_vol * 1000  # 元
+            turnover_yi = turnover_raw / 100_000_000     # 億元
+
             return {
                 "symbol": symbol,
                 "date": date_str,
-                "close": f"{df_d['C'].iloc[-1]:.2f}",
-                "indicators": data_info_str
+                "close": f"{last_close:.2f}",
+                "volume": f"{int(last_vol):,}",
+                "turnover": f"{turnover_yi:.2f}",
+                "indicators": data_info_str,
+                "_turnover_raw": turnover_raw
             }
     except Exception:
         pass
@@ -425,6 +433,11 @@ def run_screen():
             res = future.result()
             if res:
                 matches.append(res)
+
+    # 按照當日成交值由大到小排序 (降序)
+    matches.sort(key=lambda x: x.get('_turnover_raw', 0), reverse=True)
+    for m in matches:
+        m.pop('_turnover_raw', None)
 
     return jsonify({
         "success": True,
