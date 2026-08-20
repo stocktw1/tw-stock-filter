@@ -42,8 +42,14 @@ jobs:
       - name: 6. 提交並推送異動回 GitHub
         run: |
           git config --local user.email "action@github.com"
+<<<<<<< HEAD
           git config --local user.name "GitHub Action"
           # 使用 -A 確保 Git 完整捕捉到「新檔增加」與「舊檔刪除」兩種狀態
           git add -A stockdata/
           # 若資料無變動則跳過 commit，避免 workflow 報錯
           git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 自動更新台股收盤數據並清理過期舊檔" && git push)
+=======
+          git config --local user.name "GitHub Action Bot"
+          git add -A stockdata/
+          git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 自動更新盤後收盤數據與清理舊檔 [$(date +'%Y-%m-%d')]" && git push)
+>>>>>>> 8b6292b (feat: upgrade update_stock_data to TWSE/TPEx official API with auto cleanup and updated daily quotes)
