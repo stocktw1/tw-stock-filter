@@ -28,7 +28,9 @@ def load_saved_formulas():
     if os.path.exists(FORMULAS_FILE):
         try:
             with open(FORMULAS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                content = f.read()
+                content_cleaned = re.sub(r',\s*([\]}])', r'\1', content)
+                return json.loads(content_cleaned)
         except Exception:
             pass
     return {}

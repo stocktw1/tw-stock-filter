@@ -77,13 +77,16 @@ def add_indicator(name, code, period):
         append_to_formula(f"{prefix}{name} ")
 
 def load_saved_formulas():
-    """載入儲存的常用公式"""
+    """載入儲存的常用公式 (支援容錯處理)"""
     if os.path.exists(FORMULAS_FILE):
         try:
             with open(FORMULAS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            pass
+                content = f.read()
+                # 容錯：移除結尾多餘逗號 (Trailing Commas)
+                content_cleaned = re.sub(r',\s*([\]}])', r'\1', content)
+                return json.loads(content_cleaned)
+        except Exception as e:
+            print(f"載入公式失敗: {e}")
     return {}
 
 def save_formulas_to_disk(formulas_dict):
