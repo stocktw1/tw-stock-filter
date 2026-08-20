@@ -1,8 +1,6 @@
-flask>=3.0.0
 streamlit>=1.30.0
 pandas>=2.0.0
 numpy>=1.24.0
 yfinance>=0.2.30
 requests>=2.31.0
 lxml>=4.9.0
-gunicorn>=21.2.0
