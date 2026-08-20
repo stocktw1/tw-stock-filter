@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>台股技術指標篩選器 - 專業 Web 版</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="dark-theme">
+    <!-- 頂部導航欄 -->
+    <header class="app-header">
+        <div class="header-container">
+            <div class="logo-group">
+                <div class="logo-icon">📈</div>
+                <div class="logo-text">
+                    <h1>台股技術指標篩選器 <span class="badge badge-pro">HTML / Web 版</span></h1>
+                    <p class="subtitle">直覺化中文語法技術分析篩選平台 • 多週期量化指標計算</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <div class="status-badge" id="stock-count-badge">
+                    <span class="status-dot"></span>
+                    <span id="stock-count-text">載入資料庫中...</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-container">
+        <!-- 主要工作區 (雙欄佈局) -->
+        <div class="grid-layout">
+            <!-- 左欄：指標選擇與公式編輯 -->
+            <section class="card control-card">
+                <div class="card-header">
+                    <h2><span class="step-num">1</span> 選擇週期與指標元件</h2>
+                </div>
+
+                <!-- 週期切換 -->
+                <div class="period-selector-wrapper">
+                    <label class="section-label">🔄 分析週期：</label>
+                    <div class="period-toggle-group">
+                        <button type="button" class="period-btn active" data-period="日線">日線</button>
+                        <button type="button" class="period-btn" data-period="週線">週線</button>
+                        <button type="button" class="period-btn" data-period="月線">月線</button>
+                    </div>
+                </div>
+
+                <!-- 技術指標按鈕鍵盤 -->
+                <div class="indicators-section">
+                    <label class="section-label">📊 常用技術指標 (點擊加入)：</label>
+                    <div class="button-grid indicators-grid" id="indicator-buttons">
+                        <button class="btn btn-ind" data-name="收盤價" data-code="C">收盤價</button>
+                        <button class="btn btn-ind" data-name="開盤價" data-code="O">開盤價</button>
+                        <button class="btn btn-ind" data-name="最高價" data-code="H">最高價</button>
+                        <button class="btn btn-ind" data-name="最低價" data-code="L">最低價</button>
+                        <button class="btn btn-ind" data-name="成交量" data-code="V">成交量</button>
+                        <button class="btn btn-ind" data-name="K值" data-code="K(9)">K值 (9)</button>
+                        <button class="btn btn-ind" data-name="D值" data-code="D(9)">D值 (9)</button>
+                        <button class="btn btn-ind" data-name="RSI" data-code="RSI(14)">RSI (14)</button>
+                        <button class="btn btn-ind" data-name="MACD" data-code="MACD(12,26,9)">MACD</button>
+                        <button class="btn btn-ind" data-name="DIFF" data-code="DIFF(12,26)">DIFF</button>
+                        <button class="btn btn-ind" data-name="均價" data-code="MA(5)">均價 MA(5)</button>
+                        <button class="btn btn-ind" data-name="均量" data-code="VMA(5)">均量 VMA(5)</button>
+                        <button class="btn btn-ind" data-name="+DI" data-code="+DI(14)">+DI (14)</button>
+                        <button class="btn btn-ind" data-name="-DI" data-code="-DI(14)">-DI (14)</button>
+                        <button class="btn btn-ind" data-name="ADX" data-code="ADX(14)">ADX (14)</button>
+                        <button class="btn btn-ind" data-name="Osc" data-code="OSC(12,26,9)">OSC 柱狀體</button>
+                        <button class="btn btn-ind" data-name="Bias" data-code="BIAS(5)">BIAS 乖離率</button>
+                        <button class="btn btn-ind" data-name="Wms" data-code="WMS(14)">威廉指標 WMS</button>
+                        <button class="btn btn-ind" data-name="順勢指標" data-code="CCI(22)">CCI 順勢指標</button>
+                    </div>
+                </div>
+
+                <!-- 運算符號與邏輯 -->
+                <div class="operators-section">
+                    <label class="section-label">⚡ 運算符號與歷史位移：</label>
+                    <div class="button-grid operators-grid">
+                        <button class="btn btn-op" data-insert="+ ">+</button>
+                        <button class="btn btn-op" data-insert="- ">-</button>
+                        <button class="btn btn-op" data-insert="* ">*</button>
+                        <button class="btn btn-op" data-insert="/ ">/</button>
+                        <button class="btn btn-op" data-insert="> ">&gt;</button>
+                        <button class="btn btn-op" data-insert="< ">&lt;</button>
+                        <button class="btn btn-op" data-insert="= ">=</button>
+                        <button class="btn btn-op btn-logic" data-insert="AND ">AND</button>
+                        <button class="btn btn-op btn-logic" data-insert="OR ">OR</button>
+                        <div class="shift-group">
+                            <input type="number" id="shift-n-input" value="1" min="1" max="250" class="input-n" title="輸入 n 週期">
+                            <button class="btn btn-shift" id="btn-insert-shift">n日前</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 右欄：常用公式管理與公式輸入 -->
+            <section class="card formula-card">
+                <div class="card-header">
+                    <h2><span class="step-num">2</span> 常用公式庫與條件編輯</h2>
+                </div>
+
+                <!-- 常用公式庫 -->
+                <div class="saved-formulas-wrapper">
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label for="saved-formulas-select" class="section-label">📚 快速載入常用公式：</label>
+                            <div class="select-group">
+                                <select id="saved-formulas-select" class="form-select">
+                                    <option value="">-- 請選擇已儲存的公式 --</option>
+                                </select>
+                                <button type="button" id="btn-load-formula" class="btn btn-secondary">載入</button>
+                                <button type="button" id="btn-delete-formula" class="btn btn-danger-outline" title="刪除選取公式">🗑️</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-row mt-2">
+                        <div class="form-group flex-1">
+                            <div class="save-input-group">
+                                <input type="text" id="new-formula-name" class="form-input" placeholder="輸入公式名稱 (例：月KD金叉且放量)">
+                                <button type="button" id="btn-save-formula" class="btn btn-primary-outline">💾 儲存當前公式</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 公式輸入框 -->
+                <div class="formula-editor-wrapper mt-3">
+                    <div class="editor-header">
+                        <label for="formula-input" class="section-label">✍️ 篩選條件公式：</label>
+                        <button type="button" id="btn-clear-formula" class="btn-text">清空編輯區</button>
+                    </div>
+                    <textarea id="formula-input" class="formula-textarea" rows="4" placeholder="請點擊上方按鈕組合或直接在此輸入條件...&#10;範例 1: 收盤價 > 均價(5) AND 成交量 > 1日前的成交量&#10;範例 2: K值(9) > D值(9) AND 1日前的K值(9) <= 1日前的D值(9)"></textarea>
+                    <div class="formula-hints">
+                        💡 支援多週期混搭，如 <code>週K值(9) > 80 AND 日收盤價 > 日均價(20)</code>
+                    </div>
+                </div>
+
+                <!-- 執行篩選按鈕區 -->
+                <div class="actions-panel mt-4">
+                    <div class="action-buttons-group">
+                        <button type="button" id="btn-test-run" class="btn btn-action btn-test">
+                            🎯 隨機抽樣測試 (10 檔)
+                        </button>
+                        <button type="button" id="btn-full-run" class="btn btn-action btn-primary-gradient">
+                            🚀 開始全量篩選 (全市場)
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- 執行狀態與進度條 -->
+        <section class="card progress-card" id="progress-container" style="display: none;">
+            <div class="progress-info">
+                <span id="progress-status-text" class="progress-status">正在準備篩選資料...</span>
+                <span id="progress-percentage" class="progress-percentage">0%</span>
+            </div>
+            <div class="progress-bar-bg">
+                <div class="progress-bar-fill" id="progress-bar-fill"></div>
+            </div>
+        </section>
+
+        <!-- 篩選結果列表 -->
+        <section class="card results-card" id="results-container">
+            <div class="card-header results-header">
+                <div>
+                    <h2><span class="step-num">3</span> 篩選結果</h2>
+                    <p class="subtitle" id="result-summary-text">尚未執行篩選。請輸入條件後點擊上方按鈕開始。</p>
+                </div>
+                <div class="results-toolbar" id="results-toolbar" style="display: none;">
+                    <input type="text" id="table-search-input" class="search-input" placeholder="🔍 搜尋股票代碼或數據...">
+                    <button type="button" id="btn-export-csv" class="btn btn-secondary">📥 匯出 CSV 報表</button>
+                </div>
+            </div>
+
+            <!-- 結果表格 -->
+            <div class="table-responsive">
+                <table class="data-table" id="results-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="symbol">股票代碼 ⬍</th>
+                            <th data-sort="date">數據基準日 ⬍</th>
+                            <th data-sort="close">收盤價 (元) ⬍</th>
+                            <th>符合指標數據明細</th>
+                        </tr>
+                    </thead>
+                    <tbody id="results-tbody">
+                        <tr class="empty-row">
+                            <td colspan="4" class="text-center">請設定公式並執行篩選</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer class="app-footer">
+        <p>© 2026 台股技術指標篩選系統 • 高效能 HTML + Python 混合動力架構</p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

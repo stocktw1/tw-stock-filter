@@ -337,6 +337,8 @@ def process_single_stock(filename, required_inds, py_formula, requested_shifts, 
 # ----------------------------------------------------
 @app.route('/')
 def serve_index():
+    if os.path.exists(os.path.join(BASE_DIR, 'index.html')):
+        return send_from_directory(BASE_DIR, 'index.html')
     return send_from_directory(STATIC_DIR, 'index.html')
 
 @app.route('/static/<path:path>')
