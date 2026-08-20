@@ -66,7 +66,6 @@ def check_password():
                 st.rerun()
             else:
                 st.error("❌ 密碼不正確，請重新輸入！")
-        st.caption("💡 預設測試密碼為：`8888`（可於 Streamlit Cloud Secrets 中修改）")
     return False
 
 if not check_password():
