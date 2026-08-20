@@ -477,31 +477,6 @@ def process_single_stock_web(f, required_inds, py_formula, requested_shifts, per
                 date_str = df_m.index[-1].strftime('%Y-%m-%d')
             else:
                 date_str = df_d.index[-1].strftime('%Y-%m-%d')
-            
-            terms = re.findall(r'\b[DWM]_[a-zA-Z0-9_]+\b', py_formula)
-            valid_terms = set(terms)
-            data_info_list = []
-            for term in valid_terms:
-                val = scalar_dict.get(term)
-                if val is None:
-                    continue
-                val_str = f"{val:.2f}" if isinstance(val, (float, np.floating)) else str(val)
-                parts = term.split('_')
-                prefix_char = "週" if parts[0] == 'W' else ("月" if parts[0] == 'M' else "日")
-                if 'shift' in parts:
-                    shift_idx = parts.index('shift')
-                    shift_num = parts[shift_idx + 1]
-                    var_name = "_".join(parts[1:shift_idx])
-                    display_name = f"{shift_num}{prefix_char}前{prefix_char}{var_name}"
-                else:
-                    var_name = "_".join(parts[1:])
-                    display_name = f"{prefix_char}{var_name}"
-                
-                display_name = display_name.replace('PDI', '+DI').replace('MDI', '-DI').replace('CCI', '順勢指標')
-                display_name = display_name.replace('C', '收盤價').replace('O', '開盤價').replace('H', '最高價').replace('L', '最低價').replace('V', '成交量')
-                data_info_list.append(f"{display_name}={val_str}")
-                
-            data_info_str = ", ".join(sorted(data_info_list))
 
             last_close = float(df_d['C'].iloc[-1])
             last_vol = float(df_d['V'].iloc[-1]) if 'V' in df_d.columns else 0.0
