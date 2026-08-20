@@ -561,7 +561,10 @@ def run_screener(is_test=False):
         st.success(f"🎉 篩選完成！共找到 {len(matches)} 檔符合條件（已按當日成交值由大到小排序）。")
         st.dataframe(pd.DataFrame(matches), use_container_width=True)
     else:
-        st.warning("結果：沒有找到符合條件的股票。")
+        if is_test:
+            st.info("💡 隨機抽樣 10 檔中未命中此嚴格條件，請點擊右側 **【🚀 開始全量篩選】** 掃描全市場 1,120+ 檔股票！")
+        else:
+            st.warning("結果：全市場目前沒有找到完全符合所有條件的股票。")
 
 with col_run1:
     if st.button("🎯 隨機抽樣測試 (10檔)", use_container_width=True):
