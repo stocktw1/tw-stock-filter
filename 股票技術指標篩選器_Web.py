@@ -29,7 +29,12 @@ if "formula" not in st.session_state:
 
 def check_password():
     """檢查登入密碼 (支援 st.secrets, 環境變數, 預設密碼)"""
-    target_password = st.secrets.get("PASSWORD", os.environ.get("APP_PASSWORD", "8888"))
+    target_password = os.environ.get("APP_PASSWORD", "8888")
+    try:
+        if hasattr(st, "secrets") and "PASSWORD" in st.secrets:
+            target_password = str(st.secrets["PASSWORD"])
+    except Exception:
+        pass
     
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
