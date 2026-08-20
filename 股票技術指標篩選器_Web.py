@@ -108,9 +108,17 @@ def save_formulas_to_disk(formulas_dict):
     with open(FORMULAS_FILE, 'w', encoding='utf-8') as f:
         json.dump(formulas_dict, f, ensure_ascii=False, indent=4)
 
-# ------------------ 核心運算邏輯 (繼承自原版) ------------------
-@st.cache_data(show_spinner=False)
+# ------------------ 核心運算邏輯 (線程安全與高相容性) ------------------
+_CSV_CACHE = {}
+
 def load_stock_csv(filepath):
+    """線程安全的股票資料讀取函式，完全相容 Streamlit Cloud 多執行緒環境"""
+    mtime = os.path.getmtime(filepath) if os.path.exists(filepath) else 0
+    if filepath in _CSV_CACHE:
+        cached_mtime, cached_df = _CSV_CACHE[filepath]
+        if cached_mtime == mtime:
+            return cached_df.copy()
+            
     df = pd.read_csv(filepath, index_col=0)
     if 'Ticker' in df.index and 'Date' in df.index:
         df = df.drop(index=['Ticker', 'Date'])
@@ -123,7 +131,9 @@ def load_stock_csv(filepath):
     df = df[keep_cols]
     if 'Volume' in df.columns:
         df['Volume'] = df['Volume'] / 1000
-    return df
+        
+    _CSV_CACHE[filepath] = (mtime, df)
+    return df.copy()
 
 def convert_to_weekly(df):
     logic = {
