@@ -22,6 +22,20 @@ st.set_page_config(page_title="台股技術指標篩選器 - Web 版", layout="w
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "stockdata")
 FORMULAS_FILE = os.path.join(BASE_DIR, "saved_formulas.json")
+STOCK_NAMES_FILE = os.path.join(BASE_DIR, "stock_names.json")
+
+def get_stock_name(symbol):
+    """取得股票名稱"""
+    if not hasattr(get_stock_name, "_cache"):
+        names = {}
+        if os.path.exists(STOCK_NAMES_FILE):
+            try:
+                with open(STOCK_NAMES_FILE, 'r', encoding='utf-8') as f:
+                    names = json.load(f)
+            except Exception:
+                pass
+        get_stock_name._cache = names
+    return get_stock_name._cache.get(str(symbol), "")
 
 # 初始化網頁的暫存狀態 (Session State)
 if "formula" not in st.session_state:
@@ -523,6 +537,7 @@ def run_screener(is_test=False):
 
                 matches.append({
                     "代碼": symbol, 
+                    "股名": get_stock_name(symbol),
                     "日期": date_str, 
                     "收盤價": f"{last_close:.2f}",
                     "成交量(張)": f"{int(last_vol):,}",

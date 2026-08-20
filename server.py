@@ -16,8 +16,21 @@ import numpy as np
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-DATA_DIR = os.path.join(BASE_DIR, "stockdata")
 FORMULAS_FILE = os.path.join(BASE_DIR, "saved_formulas.json")
+STOCK_NAMES_FILE = os.path.join(BASE_DIR, "stock_names.json")
+
+def get_stock_name(symbol):
+    """取得股票名稱"""
+    if not hasattr(get_stock_name, "_cache"):
+        names = {}
+        if os.path.exists(STOCK_NAMES_FILE):
+            try:
+                with open(STOCK_NAMES_FILE, 'r', encoding='utf-8') as f:
+                    names = json.load(f)
+            except Exception:
+                pass
+        get_stock_name._cache = names
+    return get_stock_name._cache.get(str(symbol), "")
 
 app = Flask(__name__, static_folder=STATIC_DIR)
 
@@ -331,6 +344,7 @@ def process_single_stock(filename, required_inds, py_formula, requested_shifts, 
 
             return {
                 "symbol": symbol,
+                "name": get_stock_name(symbol),
                 "date": date_str,
                 "close": f"{last_close:.2f}",
                 "volume": f"{int(last_vol):,}",
