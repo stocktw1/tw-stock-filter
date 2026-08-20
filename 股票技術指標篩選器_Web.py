@@ -372,11 +372,16 @@ with col2:
     saved_formulas = load_saved_formulas()
     formula_names = list(saved_formulas.keys())
     
-    selected_formula = st.selectbox("載入常用公式：", ["-- 請選擇 --"] + formula_names)
-    if selected_formula != "-- 請選擇 --" and st.button("載入", use_container_width=True):
-        st.session_state.formula = saved_formulas[selected_formula]
-        st.rerun()
+    if formula_names:
+        st.caption("⚡ 點擊快速載入公式：")
+        for f_name in formula_names:
+            if st.button(f"📌 {f_name}", key=f"quick_btn_{f_name}", use_container_width=True):
+                st.session_state.formula = saved_formulas[f_name]
+                st.rerun()
+    else:
+        st.info("尚無儲存的自訂公式。")
         
+    st.divider()
     new_formula_name = st.text_input("儲存當前公式命名：")
     if st.button("儲存公式", type="primary", use_container_width=True):
         if new_formula_name and st.session_state.formula.strip():
