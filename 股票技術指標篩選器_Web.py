@@ -311,16 +311,45 @@ def calculate_dynamic_indicators(df, required_indicators):
                 high_diff, low_diff = df['H'].diff(), -df['L'].diff()
                 pos_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0.0)
                 neg_dm = np.where((low_diff > high_diff) & (low_diff > 0), low_diff, 0.0)
-                tr = pd.DataFrame({'tr1': df['H'] - df['L'], 'tr2': (df['H'] - df['C'].shift(1)).abs(), 'tr3': (df['L'] - df['C'].shift(1)).abs()}).max(axis=1)
-                alpha = 1 / period
-                atr = tr.ewm(alpha=alpha, adjust=False).mean()
-                pos_dm_smooth = pd.Series(pos_dm, index=df.index).ewm(alpha=alpha, adjust=False).mean()
-                neg_dm_smooth = pd.Series(neg_dm, index=df.index).ewm(alpha=alpha, adjust=False).mean()
+                tr = pd.DataFrame({
+                    'tr1': df['H'] - df['L'],
+                    'tr2': (df['H'] - df['C'].shift(1)).abs(),
+                    'tr3': (df['L'] - df['C'].shift(1)).abs()
+                }).max(axis=1)
+
+                # 券商標準 Wilder's Smoothing (RMA)
+                def _rma(s, n):
+                    vals = np.asarray(s, dtype=float)
+                    res = np.full(len(vals), np.nan)
+                    if len(vals) >= n:
+                        res[n - 1] = np.nanmean(vals[:n])
+                        for i in range(n, len(vals)):
+                            res[i] = (res[i - 1] * (n - 1) + (0.0 if np.isnan(vals[i]) else vals[i])) / n
+                    return pd.Series(res, index=s.index)
+
+                atr = _rma(tr, period)
+                pos_dm_smooth = _rma(pd.Series(pos_dm, index=df.index), period)
+                neg_dm_smooth = _rma(pd.Series(neg_dm, index=df.index), period)
+
                 df[pdi_col] = 100 * (pos_dm_smooth / atr)
                 df[mdi_col] = 100 * (neg_dm_smooth / atr)
+
             if ind_type == 'ADX' and adx_col not in df.columns:
                 dx = 100 * (df[pdi_col] - df[mdi_col]).abs() / (df[pdi_col] + df[mdi_col])
-                df[adx_col] = dx.ewm(alpha=1/period, adjust=False).mean()
+                # 對 DX 再做一次標準 Wilder RMA 平滑 (初始值為有效 DX 的前 period 期平均)
+                def _rma_dx(s, n):
+                    vals = np.asarray(s, dtype=float)
+                    res = np.full(len(vals), np.nan)
+                    valid_indices = np.where(~np.isnan(vals))[0]
+                    if len(valid_indices) >= n:
+                        start_i = valid_indices[n - 1]
+                        res[start_i] = np.mean(vals[valid_indices[:n]])
+                        for i in range(start_i + 1, len(vals)):
+                            cur_val = 0.0 if np.isnan(vals[i]) else vals[i]
+                            res[i] = (res[i - 1] * (n - 1) + cur_val) / n
+                    return pd.Series(res, index=s.index)
+
+                df[adx_col] = _rma_dx(dx, period)
         elif ind_type == 'BIAS':
             period = int(item[1])
             col_name = f"BIAS_{period}"
