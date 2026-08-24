@@ -19,10 +19,18 @@ import streamlit as st
 # ------------------ 系統與版面設定 ------------------
 st.set_page_config(page_title="台股技術指標篩選器 - Web 版", layout="wide", page_icon="📈")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+    BUNDLE_DIR = getattr(sys, '_MEIPASS', BASE_DIR)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    BUNDLE_DIR = BASE_DIR
+
 DATA_DIR = os.path.join(BASE_DIR, "stockdata")
 FORMULAS_FILE = os.path.join(BASE_DIR, "saved_formulas.json")
 STOCK_NAMES_FILE = os.path.join(BASE_DIR, "stock_names.json")
+if not os.path.exists(STOCK_NAMES_FILE):
+    STOCK_NAMES_FILE = os.path.join(BUNDLE_DIR, "stock_names.json")
 
 def get_stock_name(symbol):
     """取得股票名稱"""
