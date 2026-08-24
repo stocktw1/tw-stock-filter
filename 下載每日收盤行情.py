@@ -617,17 +617,20 @@ class StockDownloaderApp:
                             t = yf.Ticker(yf_symbol)
                             splits = t.splits
                             if splits is not None and not splits.empty:
-                                splits.index = pd.to_datetime(splits.index.date)
-                                s_min = stock_data.index.min()
-                                s_max = stock_data.index.max()
-                                valid_splits = splits[(splits.index > s_min) & (splits.index <= s_max) & (splits != 1.0) & (splits > 0)]
-                                if not valid_splits.empty:
-                                    split_factors = pd.Series(1.0, index=stock_data.index)
-                                    for s_date, s_val in valid_splits.items():
+                                if isinstance(stock_data.columns, pd.MultiIndex):
+                                    stock_data.columns = stock_data.columns.get_level_values(0)
+                                stock_data.index = pd.to_datetime(pd.to_datetime(stock_data.index).date)
+                                splits.index = pd.to_datetime(pd.to_datetime(splits.index).date)
+                                
+                                split_factors = pd.Series(1.0, index=stock_data.index)
+                                for s_date, s_val in splits.items():
+                                    if s_val > 0 and s_val != 1.0:
+                                        # 嚴格大於當前日期（即該交易日在除權日之前）才乘
                                         split_factors[split_factors.index < s_date] *= float(s_val)
-                                    for col in ['Open', 'High', 'Low', 'Close']:
-                                        if col in stock_data.columns:
-                                            stock_data[col] = (pd.to_numeric(stock_data[col], errors='coerce') * split_factors).round(2)
+                                
+                                for col in ['Open', 'High', 'Low', 'Close']:
+                                    if col in stock_data.columns:
+                                        stock_data[col] = (pd.to_numeric(stock_data[col], errors='coerce') * split_factors).round(2)
                         except Exception:
                             pass
 
