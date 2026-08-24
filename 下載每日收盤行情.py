@@ -612,6 +612,25 @@ class StockDownloaderApp:
                     download_triggered = True
 
                     if not stock_data.empty:
+                        # 自動校正 yfinance 預設股票分割除權因子，還原為台灣券商真實未還原撮合價
+                        try:
+                            t = yf.Ticker(yf_symbol)
+                            splits = t.splits
+                            if splits is not None and not splits.empty:
+                                splits.index = pd.to_datetime(splits.index.date)
+                                s_min = stock_data.index.min()
+                                s_max = stock_data.index.max()
+                                valid_splits = splits[(splits.index > s_min) & (splits.index <= s_max) & (splits != 1.0) & (splits > 0)]
+                                if not valid_splits.empty:
+                                    split_factors = pd.Series(1.0, index=stock_data.index)
+                                    for s_date, s_val in valid_splits.items():
+                                        split_factors[split_factors.index < s_date] *= float(s_val)
+                                    for col in ['Open', 'High', 'Low', 'Close']:
+                                        if col in stock_data.columns:
+                                            stock_data[col] = (pd.to_numeric(stock_data[col], errors='coerce') * split_factors).round(2)
+                        except Exception:
+                            pass
+
                         # 存成 CSV 檔
                         file_name = f"{symbol}_{start_date}_{end_date}.csv"
                         full_file_path = os.path.join(save_path, file_name)
