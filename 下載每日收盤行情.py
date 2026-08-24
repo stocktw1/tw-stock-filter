@@ -7,6 +7,7 @@ import tkinter as tk
 import requests
 from tkinter import filedialog, messagebox
 import pandas as pd
+import twstock
 import yfinance as yf
 
 
@@ -603,44 +604,38 @@ class StockDownloaderApp:
                     self.log(f"⚠️ {symbol} 讀取舊檔失敗，將重新下載: {str(e)}")
 
             if not updated:
-                self.log(f"正在下載 {symbol} ({idx}/{total_count})...")
+                self.log(f"正在透過 twstock 下載 {symbol} ({idx}/{total_count})...")
                 try:
-                    # 下載完整資料 (明確設定 auto_adjust=False 以符合券商未還原行情)
-                    stock_data = yf.download(
-                        yf_symbol, start=start_date, end=yf_end_date, progress=False, auto_adjust=False
-                    )
+                    start_dt = pd.to_datetime(start_date)
+                    end_dt = pd.to_datetime(end_date)
+                    stock = twstock.Stock(symbol)
+                    raw_fetch = stock.fetch_from(start_dt.year, start_dt.month)
                     download_triggered = True
 
-                    if not stock_data.empty:
-                        # 自動校正 yfinance 預設股票分割除權因子，還原為台灣券商真實未還原撮合價
-                        try:
-                            t = yf.Ticker(yf_symbol)
-                            splits = t.splits
-                            if splits is not None and not splits.empty:
-                                if isinstance(stock_data.columns, pd.MultiIndex):
-                                    stock_data.columns = stock_data.columns.get_level_values(0)
-                                stock_data.index = pd.to_datetime(pd.to_datetime(stock_data.index).date)
-                                splits.index = pd.to_datetime(pd.to_datetime(splits.index).date)
-                                
-                                split_factors = pd.Series(1.0, index=stock_data.index)
-                                for s_date, s_val in splits.items():
-                                    if s_val > 0 and s_val != 1.0:
-                                        # 嚴格大於當前日期（即該交易日在除權日之前）才乘
-                                        split_factors[split_factors.index < s_date] *= float(s_val)
-                                
-                                for col in ['Open', 'High', 'Low', 'Close']:
-                                    if col in stock_data.columns:
-                                        stock_data[col] = (pd.to_numeric(stock_data[col], errors='coerce') * split_factors).round(2)
-                        except Exception:
-                            pass
+                    if raw_fetch:
+                        df_stock = pd.DataFrame(raw_fetch)
+                        df_stock['date'] = pd.to_datetime(df_stock['date'])
+                        df_stock = df_stock[(df_stock['date'] >= start_dt) & (df_stock['date'] <= end_dt)]
+                        if not df_stock.empty:
+                            df_stock.set_index('date', inplace=True)
+                            df_stock.rename(columns={
+                                'open': 'Open',
+                                'high': 'High',
+                                'low': 'Low',
+                                'close': 'Close',
+                                'capacity': 'Volume'
+                            }, inplace=True)
+                            stock_data = df_stock[['Open', 'High', 'Low', 'Close', 'Volume']]
 
-                        # 存成 CSV 檔
-                        file_name = f"{symbol}_{start_date}_{end_date}.csv"
-                        full_file_path = os.path.join(save_path, file_name)
-                        stock_data.to_csv(full_file_path)
-                        self.log(f"✅ {symbol} 完整下載成功 -> {file_name}")
+                            # 存成 CSV 檔
+                            file_name = f"{symbol}_{start_date}_{end_date}.csv"
+                            full_file_path = os.path.join(save_path, file_name)
+                            stock_data.to_csv(full_file_path)
+                            self.log(f"✅ {symbol} 完整下載成功 -> {file_name}")
+                        else:
+                            self.log(f"📭 {symbol} 在此區間無資料。")
                     else:
-                        self.log(f"📭 {symbol} 在此區間無資料。")
+                        self.log(f"📭 {symbol} 無法從證交所獲取資料。")
 
                 except Exception as e:
                     self.log(f"❌ {symbol} 下載失敗: {str(e)}")

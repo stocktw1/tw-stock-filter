@@ -312,15 +312,15 @@ def calculate_dynamic_indicators(df, required_indicators):
                 pos_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0.0)
                 neg_dm = np.where((low_diff > high_diff) & (low_diff > 0), low_diff, 0.0)
                 tr = pd.DataFrame({'tr1': df['H'] - df['L'], 'tr2': (df['H'] - df['C'].shift(1)).abs(), 'tr3': (df['L'] - df['C'].shift(1)).abs()}).max(axis=1)
-                # 採用三竹股市 / 台灣各大券商 App 標準的 EMA 指數平滑法
-                atr = tr.ewm(span=period, adjust=False).mean()
-                pos_dm_smooth = pd.Series(pos_dm, index=df.index).ewm(span=period, adjust=False).mean()
-                neg_dm_smooth = pd.Series(neg_dm, index=df.index).ewm(span=period, adjust=False).mean()
+                alpha = 1 / period
+                atr = tr.ewm(alpha=alpha, adjust=False).mean()
+                pos_dm_smooth = pd.Series(pos_dm, index=df.index).ewm(alpha=alpha, adjust=False).mean()
+                neg_dm_smooth = pd.Series(neg_dm, index=df.index).ewm(alpha=alpha, adjust=False).mean()
                 df[pdi_col] = 100 * (pos_dm_smooth / atr)
                 df[mdi_col] = 100 * (neg_dm_smooth / atr)
             if ind_type == 'ADX' and adx_col not in df.columns:
                 dx = 100 * (df[pdi_col] - df[mdi_col]).abs() / (df[pdi_col] + df[mdi_col])
-                df[adx_col] = dx.ewm(span=period, adjust=False).mean()
+                df[adx_col] = dx.ewm(alpha=1/period, adjust=False).mean()
         elif ind_type == 'BIAS':
             period = int(item[1])
             col_name = f"BIAS_{period}"
