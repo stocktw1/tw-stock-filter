@@ -6,9 +6,14 @@ on:
     - cron: '0 10 * * 1-5'
   workflow_dispatch: # 支援在 GitHub 網頁上手動點擊執行測試
 
+concurrency:
+  group: update-daily-stock-data
+  cancel-in-progress: true
+
 jobs:
   update-data:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     
     # 賦予 GitHub Actions 讀寫儲存庫的權限
     permissions:
@@ -17,6 +22,8 @@ jobs:
     steps:
       - name: 1. 取得專案程式碼
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 2. 設定 Python 環境
         uses: actions/setup-python@v5
@@ -38,5 +45,12 @@ jobs:
           git config --local user.name "GitHub Action Bot"
           # 使用 -A 確保 Git 完整捕捉到「新檔增加」與「舊檔刪除」兩種狀態
           git add -A stockdata/
-          # 若資料無變動則跳過 commit，避免 workflow 報錯
-          git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 自動更新台股盤後收盤數據與清理舊檔 [$(date +'%Y-%m-%d')]" && git push)
+          # 若資料有變動則提交並推送
+          if ! git diff --quiet || ! git diff --staged --quiet; then
+            git commit -m "🤖 自動更新台股盤後收盤數據與清理舊檔 [$(date +'%Y-%m-%d')]"
+            git pull --rebase origin main || true
+            git push origin main
+          else
+            echo "沒有新數據需提交。"
+          fi
+

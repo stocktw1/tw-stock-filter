@@ -91,7 +91,7 @@ def update_all_stocks(target_end_date_str=None):
     print(f"[*] 開始執行台股盤後數據增量更新 (目標最新日期: {today_str})")
     print("==================================================")
 
-    # 1. 掃描現有檔案的最新日期與起始日期
+    # 1. 極速掃描現有檔案的最新日期與起始日期 (直接從檔名快速解析)
     stock_last_dates = {}
     stock_files = {}
     stock_orig_starts = {}
@@ -105,15 +105,21 @@ def update_all_stocks(target_end_date_str=None):
             orig_end = parts[2]
             if symbol.isdigit():
                 try:
-                    df_old = pd.read_csv(csv_path, index_col=0, low_memory=False)
-                    valid_dates = pd.to_datetime(df_old.index, errors='coerce').dropna()
-                    if not valid_dates.empty:
-                        last_date = valid_dates[-1]
-                        stock_last_dates[symbol] = last_date
-                        stock_files[symbol] = csv_path
-                        stock_orig_starts[symbol] = orig_start
-                except Exception as e:
-                    print(f"[!] {symbol} 讀取舊檔失敗: {e}")
+                    last_date = pd.to_datetime(orig_end)
+                    stock_last_dates[symbol] = last_date
+                    stock_files[symbol] = csv_path
+                    stock_orig_starts[symbol] = orig_start
+                except Exception:
+                    try:
+                        df_old = pd.read_csv(csv_path, index_col=0, low_memory=False)
+                        valid_dates = pd.to_datetime(df_old.index, errors='coerce').dropna()
+                        if not valid_dates.empty:
+                            last_date = valid_dates[-1]
+                            stock_last_dates[symbol] = last_date
+                            stock_files[symbol] = csv_path
+                            stock_orig_starts[symbol] = orig_start
+                    except Exception as e:
+                        print(f"[!] {symbol} 讀取舊檔失敗: {e}")
 
     if not stock_last_dates:
         print("[!] 無有效股票資料檔案可更新。")
@@ -138,7 +144,7 @@ def update_all_stocks(target_end_date_str=None):
     total_days = len(download_dates)
     print(f"[*] 預計下載交易日區間: {start_download_date.strftime('%Y-%m-%d')} ~ {today_str} (共 {total_days} 天)")
 
-    # 3. 透過證交所 / 櫃買中心 API 極速下載全市場盤後收盤資料
+    # 3. 透過證交所 / 櫃買中心 API 下載全市場盤後收盤資料 (含重試機制)
     day_data = {}
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
@@ -148,67 +154,75 @@ def update_all_stocks(target_end_date_str=None):
         print(f"[*] [{d_idx}/{total_days}] 下載 {date_str} 全市場收盤行情...")
         day_data[date_str] = {}
 
-        # 下載 TWSE (上市)
-        try:
-            url = f"https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date={date_param}&type=ALL"
-            res = requests.get(url, headers=headers, timeout=15)
-            if res.status_code == 200:
-                r_json = res.json()
-                if r_json.get("stat") == "OK" and "tables" in r_json:
-                    for tbl in r_json["tables"]:
-                        fields = tbl.get("fields", [])
-                        if "證券代號" in fields:
-                            idx_code = fields.index("證券代號")
-                            idx_open = fields.index("開盤價") if "開盤價" in fields else 5
-                            idx_high = fields.index("最高價") if "最高價" in fields else 6
-                            idx_low = fields.index("最低價") if "最低價" in fields else 7
-                            idx_close = fields.index("收盤價") if "收盤價" in fields else 8
-                            idx_vol = fields.index("成交股數") if "成交股數" in fields else 2
+        # 下載 TWSE (上市) - 最多重試 3 次
+        for attempt in range(3):
+            try:
+                url = f"https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date={date_param}&type=ALL"
+                res = requests.get(url, headers=headers, timeout=15)
+                if res.status_code == 200:
+                    r_json = res.json()
+                    if r_json.get("stat") == "OK" and "tables" in r_json:
+                        for tbl in r_json["tables"]:
+                            fields = tbl.get("fields", [])
+                            if "證券代號" in fields:
+                                idx_code = fields.index("證券代號")
+                                idx_open = fields.index("開盤價") if "開盤價" in fields else 5
+                                idx_high = fields.index("最高價") if "最高價" in fields else 6
+                                idx_low = fields.index("最低價") if "最低價" in fields else 7
+                                idx_close = fields.index("收盤價") if "收盤價" in fields else 8
+                                idx_vol = fields.index("成交股數") if "成交股數" in fields else 2
 
-                            for row in tbl.get("data", []):
-                                code = str(row[idx_code]).strip()
-                                day_data[date_str][code] = {
-                                    'Open': clean_float(row[idx_open]),
-                                    'High': clean_float(row[idx_high]),
-                                    'Low': clean_float(row[idx_low]),
-                                    'Close': clean_float(row[idx_close]),
-                                    'Volume': clean_int(row[idx_vol])
-                                }
-                            break
-        except Exception as e:
-            print(f"[!] {date_str} TWSE 下載/解析異常: {e}")
+                                for row in tbl.get("data", []):
+                                    code = str(row[idx_code]).strip()
+                                    day_data[date_str][code] = {
+                                        'Open': clean_float(row[idx_open]),
+                                        'High': clean_float(row[idx_high]),
+                                        'Low': clean_float(row[idx_low]),
+                                        'Close': clean_float(row[idx_close]),
+                                        'Volume': clean_int(row[idx_vol])
+                                    }
+                                break
+                    break
+            except Exception as e:
+                if attempt == 2:
+                    print(f"[!] {date_str} TWSE 下載/解析異常: {e}")
+                time.sleep(2.0)
 
-        # 下載 TPEx (上櫃)
-        try:
-            tw_year = date_ts.year - 1911
-            tpex_date = f"{tw_year}/{date_ts.strftime('%m/%d')}"
-            url = f"https://www.tpex.org.tw/web/stock/aftertrading/DAILY_CLOSE_quotes/stk_quote_result.php?l=zh-tw&o=json&d={tpex_date}"
-            res = requests.get(url, headers=headers, timeout=15)
-            if res.status_code == 200:
-                r_json = res.json()
-                if "tables" in r_json:
-                    for tbl in r_json["tables"]:
-                        fields = tbl.get("fields", [])
-                        if "代號" in fields or "證券代號" in fields:
-                            idx_code = fields.index("代號") if "代號" in fields else fields.index("證券代號")
-                            idx_open = fields.index("開盤") if "開盤" in fields else 4
-                            idx_high = fields.index("最高") if "最高" in fields else 5
-                            idx_low = fields.index("最低") if "最低" in fields else 6
-                            idx_close = fields.index("收盤") if "收盤" in fields else 2
-                            idx_vol = fields.index("成交股數") if "成交股數" in fields else 8
+        # 下載 TPEx (上櫃) - 最多重試 3 次
+        for attempt in range(3):
+            try:
+                tw_year = date_ts.year - 1911
+                tpex_date = f"{tw_year}/{date_ts.strftime('%m/%d')}"
+                url = f"https://www.tpex.org.tw/web/stock/aftertrading/DAILY_CLOSE_quotes/stk_quote_result.php?l=zh-tw&o=json&d={tpex_date}"
+                res = requests.get(url, headers=headers, timeout=15)
+                if res.status_code == 200:
+                    r_json = res.json()
+                    if "tables" in r_json:
+                        for tbl in r_json["tables"]:
+                            fields = tbl.get("fields", [])
+                            if "代號" in fields or "證券代號" in fields:
+                                idx_code = fields.index("代號") if "代號" in fields else fields.index("證券代號")
+                                idx_open = fields.index("開盤") if "開盤" in fields else 4
+                                idx_high = fields.index("最高") if "最高" in fields else 5
+                                idx_low = fields.index("最低") if "最低" in fields else 6
+                                idx_close = fields.index("收盤") if "收盤" in fields else 2
+                                idx_vol = fields.index("成交股數") if "成交股數" in fields else 8
 
-                            for row in tbl.get("data", []):
-                                code = str(row[idx_code]).strip()
-                                day_data[date_str][code] = {
-                                    'Open': clean_float(row[idx_open]),
-                                    'High': clean_float(row[idx_high]),
-                                    'Low': clean_float(row[idx_low]),
-                                    'Close': clean_float(row[idx_close]),
-                                    'Volume': clean_int(row[idx_vol])
-                                }
-                            break
-        except Exception as e:
-            print(f"[!] {date_str} TPEx 下載/解析異常: {e}")
+                                for row in tbl.get("data", []):
+                                    code = str(row[idx_code]).strip()
+                                    day_data[date_str][code] = {
+                                        'Open': clean_float(row[idx_open]),
+                                        'High': clean_float(row[idx_high]),
+                                        'Low': clean_float(row[idx_low]),
+                                        'Close': clean_float(row[idx_close]),
+                                        'Volume': clean_int(row[idx_vol])
+                                    }
+                                break
+                    break
+            except Exception as e:
+                if attempt == 2:
+                    print(f"[!] {date_str} TPEx 下載/解析異常: {e}")
+                time.sleep(2.0)
 
         if not day_data[date_str]:
             print(f"[-] {date_str} 無收盤資料 (非交易日或證交所未開盤)")
@@ -216,12 +230,7 @@ def update_all_stocks(target_end_date_str=None):
         if d_idx < total_days:
             time.sleep(1.0)
 
-    # 4. 取得市場代碼用以標註 yf_symbol
-    print("[*] 正在獲取市場清單以標註上市/上櫃代碼後綴...")
-    all_twse = set(fetch_market_symbols("TWSE"))
-    all_tpex = set(fetch_market_symbols("TPEx"))
-
-    # 5. 附加新數據至 CSV，並自動更名與刪除舊檔
+    # 4. 附加新數據至 CSV，並自動更名與刪除舊檔 (極速檔案寫入模式)
     update_symbols = list(need_update_stocks.keys())
     total_symbols = len(update_symbols)
     print(f"[*] 正在增量更新並清理舊檔 (共 {total_symbols} 檔個股)...")
@@ -234,9 +243,7 @@ def update_all_stocks(target_end_date_str=None):
         orig_start = stock_orig_starts[symbol]
         old_file = stock_files[symbol]
 
-        yf_symbol = f"{symbol}.TW" if symbol in all_twse else f"{symbol}.TWO"
-
-        new_rows = []
+        new_lines = []
         new_indices = []
 
         for date_ts in download_dates:
@@ -245,37 +252,26 @@ def update_all_stocks(target_end_date_str=None):
                 if date_str in day_data and symbol in day_data[date_str]:
                     s_data = day_data[date_str][symbol]
                     if s_data['Close'] is not None:
-                        new_rows.append([
-                            s_data['Close'],  # Adj Close
-                            s_data['Close'],  # Close
-                            s_data['High'] if s_data['High'] is not None else s_data['Close'],
-                            s_data['Low'] if s_data['Low'] is not None else s_data['Close'],
-                            s_data['Open'] if s_data['Open'] is not None else s_data['Close'],
-                            s_data['Volume']
-                        ])
+                        c = s_data['Close']
+                        h = s_data['High'] if s_data['High'] is not None else c
+                        l = s_data['Low'] if s_data['Low'] is not None else c
+                        o = s_data['Open'] if s_data['Open'] is not None else c
+                        v = s_data['Volume']
+                        new_lines.append(f"{date_str},{c},{c},{h},{l},{o},{v}\n")
                         new_indices.append(date_str)
 
-        # 若有新資料，附加至現有檔案
-        if new_rows:
-            cols = pd.MultiIndex.from_tuples([
-                ('Adj Close', yf_symbol),
-                ('Close', yf_symbol),
-                ('High', yf_symbol),
-                ('Low', yf_symbol),
-                ('Open', yf_symbol),
-                ('Volume', yf_symbol)
-            ], names=['Price', 'Ticker'])
-
-            df_new = pd.DataFrame(new_rows, columns=cols, index=new_indices)
+        # 若有新資料，直接寫入檔案尾部
+        if new_lines:
             try:
-                df_new.to_csv(old_file, mode='a', header=False)
+                with open(old_file, "a", encoding="utf-8") as f:
+                    f.writelines(new_lines)
                 updated_files_count += 1
             except Exception as e:
                 print(f"[!] {symbol} 寫入附加資料失敗: {e}")
 
         # 確定實際最新日期
         actual_last_date = last_date
-        if new_rows:
+        if new_indices:
             actual_last_date = pd.to_datetime(new_indices[-1])
 
         actual_last_date_str = actual_last_date.strftime('%Y-%m-%d')
@@ -295,7 +291,7 @@ def update_all_stocks(target_end_date_str=None):
         else:
             success_count += 1
 
-    # 6. 最後全面清理：防止任何同一股票有多個不同日期舊檔案的情況
+    # 5. 最後全面清理：防止任何同一股票有多個不同日期舊檔案的情況
     clean_duplicate_old_csvs()
 
     print("\n==================================================")
@@ -342,3 +338,4 @@ def clean_duplicate_old_csvs():
 
 if __name__ == "__main__":
     update_all_stocks()
+
