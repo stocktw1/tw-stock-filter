@@ -2,7 +2,8 @@ name: Auto Update Daily Stock Data
 
 on:
   schedule:
-    # 台灣時間每週一至週五 下午 18:00 (UTC 時間 10:00) 自動執行 (確保盤後數據已結算)
+    # 台灣時間每週一至週五 下午 18:00 (UTC+8 = UTC 10:00)
+    # ⚠️ GitHub Actions 排程在高峰時段可能延遲，屬正常現象
     - cron: '0 10 * * 1-5'
   workflow_dispatch: # 支援在 GitHub 網頁上手動點擊執行測試
 
@@ -14,7 +15,7 @@ jobs:
   update-data:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    
+
     # 賦予 GitHub Actions 讀寫儲存庫的權限
     permissions:
       contents: write
@@ -36,17 +37,27 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: 4. 執行盤後數據自動增量更新與清理舊檔
+      - name: 4. 預檢查 — 確認 stockdata/ 已有 CSV 基礎資料
+        run: |
+          CSV_COUNT=$(find stockdata/ -name "*.csv" 2>/dev/null | wc -l)
+          echo "[*] 目前 stockdata/ 中共有 ${CSV_COUNT} 個 CSV 檔案"
+          if [ "$CSV_COUNT" -eq 0 ]; then
+            echo "[ERROR] stockdata/ 內沒有任何 CSV 檔案！"
+            echo "        請先在本機執行完整下載後，將 stockdata/ 資料夾 commit 進 repo。"
+            exit 1
+          fi
+
+      - name: 5. 執行盤後數據自動增量更新與清理舊檔
         run: python update_stock_data.py
 
-      - name: 5. 提交並推送異動回 GitHub
+      - name: 6. 提交並推送異動回 GitHub
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Bot"
           # 使用 -A 確保 Git 完整捕捉到「新檔增加」與「舊檔刪除」兩種狀態
           git add -A stockdata/
-          # 若資料有變動則提交並推送
-          if ! git diff --quiet || ! git diff --staged --quiet; then
+          # ✅ 修正：add 後只需判斷 staged 區域是否有變動即可
+          if ! git diff --staged --quiet; then
             git commit -m "🤖 自動更新台股盤後收盤數據與清理舊檔 [$(date +'%Y-%m-%d')]"
             git pull --rebase origin main || true
             git push origin main
