@@ -3,6 +3,7 @@ import sys
 import glob
 import json
 import time
+import random
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -175,7 +176,7 @@ def update_incremental_stockdata(db_path=DEFAULT_DB_PATH,
     【升級版極速增量更新】：包含全市場重複檢驗與日期嚴格防護
     """
     if not os.path.exists(output_path):
-        log_callback(f"⚠️ 找不到個股資料夾: {output_path}，請先執行「重建 5 年資料庫」！")
+        log_callback(f"⚠️ 找不到個股資料夾: {output_path}，請先執行「重建 10 年資料庫」！")
         return False, 0
 
     existing_csvs = glob.glob(os.path.join(output_path, "*.csv"))
@@ -416,7 +417,7 @@ def assemble_stockdata_from_db(db_path=DEFAULT_DB_PATH,
                                progress_callback=None,
                                is_running_flag=lambda: True):
     """
-    從本地每日收盤行情資料庫 (daily_records) 高速全量組裝全市場個股 5 年歷史資料 (含自動重複防呆過濾)
+    從本地每日收盤行情資料庫 (daily_records) 高速全量組裝全市場個股 10 年歷史資料 (含自動重複防呆過濾)
     """
     if not os.path.exists(db_path):
         log_callback(f"❌ 錯誤：找不到資料庫路徑 {db_path}")
@@ -462,6 +463,13 @@ def assemble_stockdata_from_db(db_path=DEFAULT_DB_PATH,
         if end_dt and file_dt > end_dt:
             continue
 
+        # 1. 快速檔案大小過濾（休市假檔案固定約 73KB，真實全市場交易日 > 90KB）
+        try:
+            if os.path.getsize(fpath) < 85 * 1024:
+                continue
+        except Exception:
+            pass
+
         try:
             try:
                 df_day = pd.read_csv(fpath, encoding='utf-8-sig', dtype=str)
@@ -479,6 +487,11 @@ def assemble_stockdata_from_db(db_path=DEFAULT_DB_PATH,
             c_vol = cols.get('成交股數') or cols.get('成交量')
 
             if not (c_code and c_close):
+                continue
+
+            # 2. 核心真偽校驗：真實全市場交易日至少有 1200 檔以上，且權值股 2330 必須在其中撮合交易
+            codes_series = df_day[c_code].astype(str).str.strip()
+            if len(df_day) < 1200 or not (codes_series == '2330').any():
                 continue
 
             current_day_snapshot = {}
@@ -550,7 +563,7 @@ def assemble_stockdata_from_db(db_path=DEFAULT_DB_PATH,
         log_callback("⚠️ 未解析出任何有效的股票資料！")
         return False, 0
 
-    actual_start_date = min(processed_dates) if processed_dates else "2021-08-09"
+    actual_start_date = min(processed_dates) if processed_dates else "2016-08-12"
     actual_end_date = max(processed_dates) if processed_dates else "2026-08-21"
     log_callback(f"✅ 資料載入完成！共 {len(processed_dates)} 個有效交易日 ({actual_start_date} ~ {actual_end_date})，涵蓋 {len(stock_records)} 檔個股。耗時: {time.time()-t0:.2f} 秒")
 
@@ -565,7 +578,7 @@ def assemble_stockdata_from_db(db_path=DEFAULT_DB_PATH,
             pass
     log_callback(f"🗑️ 已安全刪除舊有 {len(old_files)} 個 CSV 歷史檔案。")
 
-    log_callback("💾 開始將 5 年歷史 K 線資料轉檔為個股 CSV...")
+    log_callback("💾 開始將 10 年歷史 K 線資料轉檔為個股 CSV...")
     total_stocks = len(stock_records)
     saved_count = 0
     t1 = time.time()
@@ -617,16 +630,187 @@ def assemble_stockdata_from_db(db_path=DEFAULT_DB_PATH,
             log_callback(f"⚠️ 更新 stock_names.json 失敗: {e}")
 
     elapsed = time.time() - t1
-    log_callback(f"🎉 5 年全市場歷史資料組裝完成！成功建立 {saved_count} 檔個股檔案，耗時 {elapsed:.2f} 秒。")
+    log_callback(f"🎉 10 年全市場歷史資料組裝完成！成功建立 {saved_count} 檔個股檔案，耗時 {elapsed:.2f} 秒。")
     return True, saved_count
+
+
+def verify_random_samples(db_path=DEFAULT_DB_PATH,
+                          output_path=DEFAULT_OUTPUT_PATH,
+                          num_stocks=5,
+                          days_per_stock=3,
+                          log_callback=print,
+                          is_running_flag=lambda: True):
+    """
+    【隨機抽檢驗證資料正確機制】
+    隨機選取 num_stocks 檔個股，每檔隨機抽取 days_per_stock 個歷史交易日，
+    逐一比對 stockdata/ 重組後 CSV 與 D:\csv資料庫 當日原始收盤行情檔 (Open, High, Low, Close, Volume)。
+    確保重組資料無缺漏、無偏移且 100% 精確吻合。
+    """
+    if not os.path.exists(output_path):
+        log_callback(f"❌ 驗證失敗：找不到輸出資料夾 {output_path}")
+        return False, 0.0
+
+    if not os.path.exists(db_path):
+        log_callback(f"❌ 驗證失敗：找不到來源資料庫路徑 {db_path}")
+        return False, 0.0
+
+    csv_files = glob.glob(os.path.join(output_path, "*.csv"))
+    if not csv_files:
+        log_callback("❌ 驗證失敗：stockdata 中無任何個股 CSV 檔案，請先執行組裝！")
+        return False, 0.0
+
+    log_callback("\n" + "=" * 55)
+    log_callback("🔬 開始執行【隨機抽檢驗證資料正確機制】")
+    log_callback(f"📌 規劃抽檢：{num_stocks} 檔個股 × 每檔 {days_per_stock} 個交易日")
+    log_callback("=" * 55)
+
+    # 優先挑選指標股 (2330 / 2317 如存在)，其餘隨機選取
+    selected_files = []
+    for sym in ['2330', '2317']:
+        matched = [p for p in csv_files if os.path.basename(p).startswith(f"{sym}_")]
+        if matched:
+            selected_files.append(matched[0])
+
+    remaining = [p for p in csv_files if p not in selected_files]
+    needed = max(0, num_stocks - len(selected_files))
+    if remaining and needed > 0:
+        selected_files.extend(random.sample(remaining, min(needed, len(remaining))))
+
+    total_checks = 0
+    passed_checks = 0
+    failed_checks = 0
+
+    for s_idx, stock_file in enumerate(selected_files, 1):
+        if not is_running_flag():
+            log_callback("🛑 使用者已中止驗證作業。")
+            return False, 0.0
+
+        fname = os.path.basename(stock_file)
+        parts = fname.replace(".csv", "").split("_")
+        code = parts[0]
+
+        try:
+            df_stock = pd.read_csv(stock_file)
+            if 'Date' in df_stock.columns:
+                df_stock.set_index('Date', inplace=True)
+        except Exception as e:
+            log_callback(f"⚠️ 讀取個股檔案 {fname} 失敗: {e}")
+            continue
+
+        available_dates = df_stock.index.tolist()
+        if not available_dates:
+            continue
+
+        sample_dates = random.sample(available_dates, min(days_per_stock, len(available_dates)))
+        log_callback(f"\n🏷️ [抽檢股票 {s_idx}/{len(selected_files)}] 代號: {code} ({fname})")
+
+        for d_str in sample_dates:
+            if not is_running_flag():
+                return False, 0.0
+
+            total_checks += 1
+            d_clean = str(d_str).strip()
+            date_nodash = d_clean.replace("-", "")
+            possible_paths = [
+                os.path.join(db_path, f"{date_nodash}.csv"),
+                os.path.join(db_path, f"{d_clean}.csv")
+            ]
+
+            daily_file = None
+            for p in possible_paths:
+                if os.path.exists(p):
+                    daily_file = p
+                    break
+
+            if not daily_file:
+                log_callback(f"  ⚠️ 日期 {d_clean}：來源資料庫無此日交易檔案，略過此點。")
+                continue
+
+            try:
+                try:
+                    df_day = pd.read_csv(daily_file, encoding='utf-8-sig', dtype=str)
+                except Exception:
+                    df_day = pd.read_csv(daily_file, encoding='cp950', dtype=str)
+            except Exception as e:
+                log_callback(f"  ⚠️ 讀取原始日檔 {os.path.basename(daily_file)} 失敗: {e}")
+                continue
+
+            cols = {c.strip(): c for c in df_day.columns}
+            c_code = cols.get('證券代號') or cols.get('代號')
+            c_open = cols.get('開盤價') or cols.get('開盤')
+            c_high = cols.get('最高價') or cols.get('最高')
+            c_low = cols.get('最低價') or cols.get('最低')
+            c_close = cols.get('收盤價') or cols.get('收盤')
+            c_vol = cols.get('成交股數') or cols.get('成交量')
+
+            if not c_code:
+                continue
+
+            matched_row = df_day[df_day[c_code].str.strip() == code]
+            if matched_row.empty:
+                log_callback(f"  ℹ️ 日期 {d_clean}：個股 {code} 在原始日檔中無交易 (停牌/未上市)")
+                continue
+
+            row_raw = matched_row.iloc[0]
+            raw_c = clean_num(row_raw[c_close])
+            raw_o = clean_num(row_raw[c_open]) if c_open else raw_c
+            raw_h = clean_num(row_raw[c_high]) if c_high else raw_c
+            raw_l = clean_num(row_raw[c_low]) if c_low else raw_c
+            raw_v = clean_num(row_raw[c_vol], is_float=False) if c_vol else 0
+
+            raw_o = raw_o if raw_o is not None else raw_c
+            raw_h = raw_h if raw_h is not None else raw_c
+            raw_l = raw_l if raw_l is not None else raw_c
+
+            stock_row = df_stock.loc[d_str]
+            if isinstance(stock_row, pd.DataFrame):
+                stock_row = stock_row.iloc[0]
+
+            asm_o = clean_num(stock_row.get('Open'))
+            asm_h = clean_num(stock_row.get('High'))
+            asm_l = clean_num(stock_row.get('Low'))
+            asm_c = clean_num(stock_row.get('Close'))
+            asm_v = clean_num(stock_row.get('Volume'), is_float=False)
+
+            diff_o = abs((asm_o or 0) - (raw_o or 0))
+            diff_h = abs((asm_h or 0) - (raw_h or 0))
+            diff_l = abs((asm_l or 0) - (raw_l or 0))
+            diff_c = abs((asm_c or 0) - (raw_c or 0))
+            diff_v = abs((asm_v or 0) - (raw_v or 0))
+
+            is_perfect = (diff_o < 1e-3 and diff_h < 1e-3 and diff_l < 1e-3 and diff_c < 1e-3 and diff_v == 0)
+
+            if is_perfect:
+                passed_checks += 1
+                log_callback(f"  ✅ 日期 {d_clean}：比對完全吻合！(收盤:{asm_c}, 開盤:{asm_o}, 高:{asm_h}, 低:{asm_l}, 量:{asm_v:,})")
+            else:
+                failed_checks += 1
+                log_callback(f"  ❌ 日期 {d_clean}：數據發現差異！")
+                log_callback(f"     -> 重組檔: O={asm_o}, H={asm_h}, L={asm_l}, C={asm_c}, V={asm_v}")
+                log_callback(f"     -> 原始檔: O={raw_o}, H={raw_h}, L={raw_l}, C={raw_c}, V={raw_v}")
+
+    accuracy_rate = (passed_checks / total_checks * 100.0) if total_checks > 0 else 0.0
+    log_callback("\n" + "=" * 55)
+    log_callback("📊 【隨機抽檢驗證結果摘要】")
+    log_callback(f"  總抽檢比對點數：{total_checks} 點")
+    log_callback(f"  完全吻合點數　：{passed_checks} 點")
+    log_callback(f"  發現異常點數　：{failed_checks} 點")
+    log_callback(f"  資料正確吻合率：{accuracy_rate:.2f}%")
+    if failed_checks == 0 and total_checks > 0:
+        log_callback("🏆 結論：驗證通過！重組後的歷史數據與原始資料庫 100% 精確吻合！")
+    else:
+        log_callback("⚠️ 結論：檢驗發現不一致，請檢查來源資料庫。")
+    log_callback("=" * 55 + "\n")
+
+    return (failed_checks == 0 and total_checks > 0), accuracy_rate
 
 
 class StockDownloaderApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("台股 5 年歷史資料組裝與盤後更新器 v2.0")
-        self.root.geometry("660x780")
-        self.root.minsize(600, 700)
+        self.root.title("台股 10 年歷史資料組裝與盤後更新器 v2.0")
+        self.root.geometry("700x820")
+        self.root.minsize(640, 700)
 
         self.is_running = False
         self.create_widgets()
@@ -636,7 +820,7 @@ class StockDownloaderApp:
         header_frame.pack(fill="x")
         title_label = tk.Label(
             header_frame,
-            text="📈 台股 5 年歷史資料組裝與盤後更新器",
+            text="📈 台股 10 年歷史資料組裝與盤後更新器",
             font=("Microsoft JhengHei", 15, "bold"),
             fg="white",
             bg="#1E3A8A"
@@ -679,7 +863,7 @@ class StockDownloaderApp:
         tk.Label(date_frame, text="起始日期：", font=("Microsoft JhengHei", 9)).grid(row=0, column=0, padx=5, pady=6, sticky="w")
         self.start_entry = tk.Entry(date_frame, font=("Microsoft JhengHei", 9))
         self.start_entry.grid(row=0, column=1, sticky="ew", padx=5)
-        self.start_entry.insert(0, "2021-08-01")
+        self.start_entry.insert(0, "2016-08-12")
         self.setup_context_menu(self.start_entry)
 
         tk.Label(date_frame, text="結束日期：", font=("Microsoft JhengHei", 9)).grid(row=0, column=2, padx=5, pady=6, sticky="w")
@@ -701,49 +885,60 @@ class StockDownloaderApp:
         tpex_chk = tk.Checkbutton(market_frame, text="包含上櫃 (TPEx)", variable=self.tpex_var, font=("Microsoft JhengHei", 9))
         tpex_chk.pack(side="left", padx=15)
 
-        # 5. 操作按鈕區 (全量組裝 + 增量更新 + 停止)
+        # 5. 操作按鈕區 (增量更新 + 全量組裝 + 隨機抽檢 + 停止)
         btn_frame = tk.Frame(main_container)
         btn_frame.pack(fill="x", pady=8)
 
         self.update_btn = tk.Button(
             btn_frame,
-            text="🔄 增量更新 (含真偽防呆校驗)",
+            text="🔄 增量更新 (防呆校驗)",
             bg="#10B981",
             fg="white",
-            font=("Microsoft JhengHei", 10, "bold"),
+            font=("Microsoft JhengHei", 9, "bold"),
             relief="raised",
             command=self.start_update_thread
         )
-        self.update_btn.pack(side="left", fill="x", expand=True, padx=3, ipady=6)
+        self.update_btn.pack(side="left", fill="x", expand=True, padx=2, ipady=6)
 
         self.rebuild_btn = tk.Button(
             btn_frame,
-            text="⚡ 重建 5 年資料庫 (全量組裝)",
+            text="⚡ 重建 10 年資料庫",
             bg="#2563EB",
             fg="white",
-            font=("Microsoft JhengHei", 10, "bold"),
+            font=("Microsoft JhengHei", 9, "bold"),
             relief="raised",
             command=self.start_assemble_thread
         )
-        self.rebuild_btn.pack(side="left", fill="x", expand=True, padx=3, ipady=6)
+        self.rebuild_btn.pack(side="left", fill="x", expand=True, padx=2, ipady=6)
+
+        self.verify_btn = tk.Button(
+            btn_frame,
+            text="🔍 隨機抽檢驗證",
+            bg="#8B5CF6",
+            fg="white",
+            font=("Microsoft JhengHei", 9, "bold"),
+            relief="raised",
+            command=self.start_verify_thread
+        )
+        self.verify_btn.pack(side="left", fill="x", expand=True, padx=2, ipady=6)
 
         self.stop_btn = tk.Button(
             btn_frame,
             text="🛑 停止",
             bg="#DC2626",
             fg="white",
-            font=("Microsoft JhengHei", 10, "bold"),
+            font=("Microsoft JhengHei", 9, "bold"),
             state="disabled",
             command=self.stop_action
         )
-        self.stop_btn.pack(side="right", padx=3, ipady=6)
+        self.stop_btn.pack(side="right", padx=2, ipady=6)
 
         # 6. 進度條與狀態標籤
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_bar = ttk.Progressbar(main_container, variable=self.progress_var, maximum=100)
         self.progress_bar.pack(fill="x", pady=6)
 
-        self.status_label = tk.Label(main_container, text="準備就緒。請選擇「增量更新」或「重建 5 年資料庫」。", font=("Microsoft JhengHei", 9), anchor="w", fg="#4B5563")
+        self.status_label = tk.Label(main_container, text="準備就緒。請選擇「增量更新」、「重建 10 年資料庫」或「隨機抽檢驗證」。", font=("Microsoft JhengHei", 9), anchor="w", fg="#4B5563")
         self.status_label.pack(fill="x")
 
         # 7. 日誌視窗
@@ -800,6 +995,7 @@ class StockDownloaderApp:
         st = "disabled" if running else "normal"
         self.rebuild_btn.config(state=st)
         self.update_btn.config(state=st)
+        self.verify_btn.config(state=st)
         self.stop_btn.config(state="normal" if running else "disabled")
 
     def start_assemble_thread(self):
@@ -813,11 +1009,11 @@ class StockDownloaderApp:
             messagebox.showerror("錯誤", f"找不到資料庫目錄：\n{db_path}")
             return
 
-        if not messagebox.askyesno("確認重建", "此操作將會全量重新組裝 5 年個股資料庫，並覆蓋取代 stockdata 中的舊檔案。\n確定要繼續嗎？"):
+        if not messagebox.askyesno("確認重建", "此操作將會全量重新組裝 10 年個股資料庫，並覆蓋取代 stockdata 中的舊檔案。\n組裝完成後將自動進行隨機抽樣數據驗證。\n確定要繼續嗎？"):
             return
 
         self.set_running_ui(True)
-        self.update_progress(0, "正在啟動全量組裝作業...")
+        self.update_progress(0, "正在啟動 10 年全量組裝作業...")
 
         def run():
             start_d = self.start_entry.get().strip() or None
@@ -837,12 +1033,22 @@ class StockDownloaderApp:
                 is_running_flag=lambda: self.is_running
             )
 
-            self.set_running_ui(False)
-
-            if success:
-                self.update_progress(100, f"✅ 組裝完成！成功建立 {count} 檔個股 5 年歷史資料。")
-                messagebox.showinfo("完成", f"已成功組裝全市場 {count} 檔個股 5 年歷史資料！")
+            if success and self.is_running:
+                self.update_progress(95, "組裝完成！正在執行自動隨機抽樣驗證...")
+                self.log("\n🔍 開始執行自動隨機抽檢驗證...")
+                verify_ok, rate = verify_random_samples(
+                    db_path=db_path,
+                    output_path=out_path,
+                    num_stocks=5,
+                    days_per_stock=3,
+                    log_callback=self.log,
+                    is_running_flag=lambda: self.is_running
+                )
+                self.set_running_ui(False)
+                self.update_progress(100, f"✅ 組裝與驗證完成！共 {count} 檔個股，比對正確率 {rate:.2f}%")
+                messagebox.showinfo("完成", f"已成功組裝全市場 {count} 檔個股 10 年歷史資料！\n隨機抽檢數據比對吻合率：{rate:.2f}%")
             else:
+                self.set_running_ui(False)
                 self.update_progress(0, "作業中止或失敗。")
 
         t = threading.Thread(target=run, daemon=True)
@@ -856,7 +1062,7 @@ class StockDownloaderApp:
         out_path = self.out_entry.get().strip()
 
         if not os.path.exists(out_path):
-            messagebox.showerror("錯誤", f"找不到個股資料夾：\n{out_path}\n請先執行「重建 5 年資料庫」。")
+            messagebox.showerror("錯誤", f"找不到個股資料夾：\n{out_path}\n請先執行「重建 10 年資料庫」。")
             return
 
         self.set_running_ui(True)
@@ -889,6 +1095,44 @@ class StockDownloaderApp:
         t = threading.Thread(target=run, daemon=True)
         t.start()
 
+    def start_verify_thread(self):
+        if self.is_running:
+            return
+
+        db_path = self.db_entry.get().strip()
+        out_path = self.out_entry.get().strip()
+
+        if not os.path.exists(out_path):
+            messagebox.showerror("錯誤", f"找不到個股資料夾：\n{out_path}\n請先確認資料夾存在。")
+            return
+        if not os.path.exists(db_path):
+            messagebox.showerror("錯誤", f"找不到來源資料庫目錄：\n{db_path}")
+            return
+
+        self.set_running_ui(True)
+        self.update_progress(0, "正在進行隨機抽檢資料比對...")
+
+        def run():
+            success, rate = verify_random_samples(
+                db_path=db_path,
+                output_path=out_path,
+                num_stocks=5,
+                days_per_stock=3,
+                log_callback=self.log,
+                is_running_flag=lambda: self.is_running
+            )
+            self.set_running_ui(False)
+            if success:
+                self.update_progress(100, f"✅ 抽檢完成！比對正確率: {rate:.2f}%")
+                messagebox.showinfo("抽檢結果", f"隨機抽檢比對完成！\n資料正確吻合率：{rate:.2f}% (數值 100% 吻合)")
+            else:
+                self.update_progress(0, "抽檢發現異常或已中止。")
+                if not success and rate > 0:
+                    messagebox.showwarning("抽檢警告", f"抽檢比對發現部分不符，正確率：{rate:.2f}%")
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+
     def stop_action(self):
         if self.is_running:
             self.is_running = False
@@ -905,8 +1149,15 @@ if __name__ == "__main__":
                 log_callback=print,
                 progress_callback=lambda p, m: print(f"[{p}%] {m}")
             )
+        elif "--verify" in sys.argv:
+            print("[*] 正在以 CLI 模式執行隨機抽樣數據驗證...")
+            verify_random_samples(
+                db_path=DEFAULT_DB_PATH,
+                output_path=DEFAULT_OUTPUT_PATH,
+                log_callback=print
+            )
         elif "--cli" in sys.argv or "--rebuild" in sys.argv:
-            print("[*] 正在以 CLI 模式執行台股 5 年歷史資料全量組裝...")
+            print("[*] 正在以 CLI 模式執行台股 10 年歷史資料全量組裝...")
             assemble_stockdata_from_db(
                 db_path=DEFAULT_DB_PATH,
                 output_path=DEFAULT_OUTPUT_PATH,

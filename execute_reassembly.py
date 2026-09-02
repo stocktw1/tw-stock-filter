@@ -69,6 +69,13 @@ def execute_clean_assembly():
     processed_dates = []
 
     for idx, fpath in enumerate(csv_files, 1):
+        # 1. 快速檔案大小過濾（休市假檔案固定約 73KB，真實全市場交易日 > 90KB）
+        try:
+            if os.path.getsize(fpath) < 85 * 1024:
+                continue
+        except Exception:
+            pass
+
         fname = os.path.basename(fpath).replace(".csv", "")
         date_raw = fname.replace("-", "")
         if len(date_raw) == 8 and date_raw.isdigit():
@@ -94,25 +101,31 @@ def execute_clean_assembly():
             if not (c_code and c_close):
                 continue
 
-            for _, row in df_day.iterrows():
-                code = str(row[c_code]).strip()
+            # 2. 核心真偽校驗：真實全市場交易日至少有 1200 檔以上，且權值股 2330 必須在其中撮合交易
+            codes_series = df_day[c_code].astype(str).str.strip()
+            if len(df_day) < 1200 or not (codes_series == '2330').any():
+                continue
+
+            for row in df_day.itertuples(index=False):
+                row_dict = row._asdict()
+                code = str(row_dict.get(c_code, '')).strip()
                 if not code or code in ["--", "---", "nan", "None"]:
                     continue
                 if len(code) not in (4, 5):
                     continue
 
-                name = str(row[c_name]).strip() if c_name else ""
+                name = str(row_dict.get(c_name, '')).strip() if c_name else ""
                 if name and code not in stock_names:
                     stock_names[code] = name
 
-                c_val = clean_num(row[c_close])
+                c_val = clean_num(row_dict.get(c_close))
                 if c_val is None:
                     continue
 
-                o_val = clean_num(row[c_open]) if c_open else c_val
-                h_val = clean_num(row[c_high]) if c_high else c_val
-                l_val = clean_num(row[c_low]) if c_low else c_val
-                v_val = clean_num(row[c_vol], is_float=False) if c_vol else 0
+                o_val = clean_num(row_dict.get(c_open)) if c_open else c_val
+                h_val = clean_num(row_dict.get(c_high)) if c_high else c_val
+                l_val = clean_num(row_dict.get(c_low)) if c_low else c_val
+                v_val = clean_num(row_dict.get(c_vol), is_float=False) if c_vol else 0
 
                 o_val = o_val if o_val is not None else c_val
                 h_val = h_val if h_val is not None else c_val

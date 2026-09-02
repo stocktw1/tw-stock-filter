@@ -115,6 +115,44 @@ def save_formulas_to_disk(formulas_dict):
     with open(FORMULAS_FILE, 'w', encoding='utf-8') as f:
         json.dump(formulas_dict, f, ensure_ascii=False, indent=4)
 
+def sanitize_filename_part(name: str) -> str:
+    """清理公式或字串，轉為適合 Windows/網頁下載的安全檔名"""
+    replacements = {
+        '>=': '大於等於',
+        '<=': '小於等於',
+        '==': '等於',
+        '=': '等於',
+        '>': '大於',
+        '<': '小於',
+        '!=': '不等於',
+        '+': '加',
+        '*': '乘',
+        '/': '除',
+    }
+    sanitized = name
+    for op, rep in replacements.items():
+        sanitized = sanitized.replace(op, rep)
+    # 移除非法字元 (Windows 檔案系統禁止字元與換行空白)
+    sanitized = re.sub(r'[\\/*?:"<>|\n\r\t]', '_', sanitized)
+    # 壓縮多餘空白與底線
+    sanitized = re.sub(r'[\s_]+', '_', sanitized).strip('_')
+    # 截斷過長檔名（避免超過系統路徑限制）
+    if len(sanitized) > 40:
+        sanitized = sanitized[:40]
+    return sanitized or "選股結果"
+
+def get_effective_formula_name(formula_str: str, saved_formulas: dict) -> str:
+    """根據當前公式字串，優先比對常用公式名稱；若無匹配則清洗公式內容"""
+    clean_input = re.sub(r'\s+', ' ', formula_str).strip()
+    if not clean_input:
+        return "選股結果"
+    # 1. 先反查已儲存的公式庫（忽略空白差異比對）
+    for name, saved_f in saved_formulas.items():
+        if re.sub(r'\s+', ' ', saved_f).strip() == clean_input:
+            return sanitize_filename_part(name)
+    # 2. 若無匹配，則清洗公式文字內容
+    return sanitize_filename_part(clean_input)
+
 # ------------------ 核心運算邏輯 (線程安全與高相容性) ------------------
 _CSV_CACHE = {}
 
@@ -586,11 +624,15 @@ def run_screener(is_test=False):
         
         # 匯出排列整齊、無亂碼的 CSV 檔案 (包含 utf-8-sig BOM 標籤)
         csv_bytes = df_results.to_csv(index=False).encode('utf-8-sig')
-        current_time_str = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+        current_date_str = pd.Timestamp.now().strftime('%Y%m%d')
+        saved_f_dict = load_saved_formulas()
+        formula_tag = get_effective_formula_name(formula_raw, saved_f_dict)
+        export_file_name = f"{formula_tag}_{current_date_str}.csv"
+
         st.download_button(
             label="📥 下載篩選結果為 CSV 檔案",
             data=csv_bytes,
-            file_name=f"台股選股結果_{current_time_str}.csv",
+            file_name=export_file_name,
             mime="text/csv",
             type="primary",
             use_container_width=True
