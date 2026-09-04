@@ -2,9 +2,9 @@ name: Auto Update Daily Stock Data
 
 on:
   schedule:
-    # 台灣時間每週一至週五 下午 18:00 (UTC+8 = UTC 10:00)
-    # ⚠️ GitHub Actions 排程在高峰時段可能延遲，屬正常現象
-    - cron: '0 10 * * 1-5'
+    # 台灣時間每週一至週五 下午 16:51 (UTC+8 = UTC 08:51，避開整點塞車高峰)
+    # ⚠️ GitHub Actions 排程在高峰時段可能微幅延遲，屬正常現象
+    - cron: '51 8 * * 1-5'
   workflow_dispatch: # 支援在 GitHub 網頁上手動點擊執行測試
 
 concurrency:
